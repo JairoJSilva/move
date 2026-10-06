@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+# Interrompe e desabilita serviço systemd se ativo
+if [ -x "$(command -v systemctl)" ]; then
+    systemctl stop moveops.service 2>/dev/null || true
+    systemctl disable moveops.service 2>/dev/null || true
+fi
+
+exit 0

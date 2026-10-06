@@ -1,0 +1,13 @@
+Package: moveops
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: MoveOps Engineering Team <support@moveops.io>
+Depends: libc6 (>= 2.14)
+Recommends: xdg-utils, libnotify-bin
+Description: MoveOps - Enterprise Data Migration Engine
+ MoveOps é um motor de migração e sincronização de dados de alta performance,
+ tolerante a falhas, com rate limiting dinâmico em Dual Token Bucket,
+ auditoria criptográfica xxHash64, interface web SPA embarcada e suporte
+ a execução em segundo plano com integração de bandeja do sistema.

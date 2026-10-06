@@ -1,0 +1,22 @@
+[Unit]
+Description=MoveOps - Enterprise Data Migration Engine
+After=network.target local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/moveops -port 8080 -audit-dir /var/log/moveops
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+LimitNPROC=65536
+StandardOutput=journal
+StandardError=journal
+
+# Hardening e Isolamento de Segurança Systemd
+NoNewPrivileges=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

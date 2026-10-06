@@ -1,5 +1,9 @@
 # Binaries and executables
 bin/
+/dist/
+*.deb
+*.rpm
+*.msi
 *.exe
 *.exe~
 *.dll

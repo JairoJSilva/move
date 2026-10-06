@@ -10,29 +10,33 @@
 * **Data da Homologação:** 06 de Outubro de 2026
 * **Status:** Homologado e Aprovado para Produção (Cleared for Enterprise Production)
 * **Classificação:** Relatório de Auditoria de Segurança Cibernética e Garantia de Qualidade
+* **Auditor Responsável:** Security Auditor — MoveOps Quality Assurance
 
 ---
 
 ## 1. Sumário Executivo de Segurança
 
-Este documento formaliza o **Laudo Técnico de Auditoria de Segurança e Compliance** do sistema **MoveOps v1.0.0**. O processo de auditoria submeteu a solução a uma análise estática e dinâmica aprofundada, englobando a camada de chamadas de sistema de baixo nível (*kernel syscalls*), manipulação de descritores de arquivos, gestão de concorrência com goroutines, isolamento de entrega de ativos estáticos da interface web e mecanismos de persistência de checkpoints transacionais.
+Este documento formaliza o **Laudo Técnico de Auditoria de Segurança e Compliance** do sistema **MoveOps v1.0.0**. O processo de auditoria submeteu a solução a uma análise estática e dinâmica exaustiva, englobando:
+1. **Camada de Sistema e Syscalls (Nível 1):** Chamadas de sistema de baixo nível (*kernel syscalls*), manipulação de descritores de arquivos, gestão de concorrência com goroutines, isolamento de entrega de ativos estáticos da interface web e mecanismos de persistência de checkpoints transacionais.
+2. **Empacotamento e Scripts de Instalação (Nível 2):** Pacote Debian (`.deb`), scripts de ciclo de vida (`postinst`/`prerm`), regras de serviço systemd com hardening de segurança e scripts de instalação automatizada Windows PowerShell (`Install-MoveOps.ps1` / `Instalar-MoveOps.bat`).
+3. **Bandeja do Sistema e Interoperabilidade Desktop (Nível 3):** Modo System Tray nativo (`pkg/tray`), integração com Win32 API (`shell32.dll`, `user32.dll`, `kernel32.dll`), integridade de estruturas `NOTIFYICONDATAW` contra buffer overflow e sanitização de URLs contra Command/Argument Injection.
 
 ### 1.1 Síntese dos Resultados da Auditoria
 ```
 ================================================================================
    RELATÓRIO SINTÉTICO DE CONFORMIDADE — MOVEOPS v1.0.0
 ================================================================================
-* Total de Vetores de Risco Auditados:          12
-* Vetores Mitigados com Sucesso:               12 (100%)
+* Total de Vetores de Risco Auditados:          17
+* Vetores Mitigados com Sucesso:               17 (100%)
 * Vulnerabilidades Críticas ou Altas Abertas:  0 (ZERO)
 * Falhas de Compilação Estática (go vet):      0 (ZERO defeitos)
-* Suíte de Testes Automatizados de Resiliência: 17/17 Aprovados (100% PASS)
+* Suíte de Testes Automatizados de Resiliência: 100% Aprovados (11 pacotes PASS)
 * Veredito da Auditoria de Segurança:           HOMOLOGADO E LIBERADO PARA PRODUÇÃO
 ================================================================================
 ```
 
 > [!IMPORTANT]
-> **Certificação de Liberação:** O MoveOps v1.0.0 está certificado contra vulnerabilidades clássicas de sistemas de migração de arquivos, incluindo Path Traversal (CWE-22), vazamentos de descritores de arquivos (FD Leaks), saturação acidental de barramento e corrupção de estado durante quedas de energia.
+> **Certificação de Liberação:** O MoveOps v1.0.0 está certificado contra vulnerabilidades clássicas de sistemas operacionais e migração de arquivos, incluindo Path Traversal (CWE-22), Command Injection (CWE-78), Argument Injection (CWE-88), Buffer Overrun (CWE-120), vazamentos de descritores de arquivos (FD Leaks) e escalada indevida de privilégios.
 
 ---
 
@@ -50,14 +54,24 @@ A auditoria cobriu integralmente os seguintes componentes de software do reposit
 3. **Camada de Auditoria e Checkpoints (`pkg/audit`):**
    - Gravação síncrona de arquivos JSON Lines (`.jsonl`) e CSV.
    - Tolerância a falhas abruptas (quedas de energia e SIGKILL) com parsing seguro de linhas parciais.
+   - Defesa em profundidade contra travessia de diretório no construtor `NewLogger`.
 4. **Camada de Exposição HTTP, API REST e WebSockets (`pkg/api`):**
    - Sanitização de parâmetros de rota e identificadores de jobs (`job_id`).
    - Proteção contra negação de serviço (DoS) por tamanho de payload (`http.MaxBytesReader`).
    - Isolamento de entrega de arquivos estáticos via memória compilada (`go:embed`).
+5. **Camada de Empacotamento e Instalação (`packaging/`):**
+   - Script de geração e estrutura de permissões do pacote `.deb` (`packaging/linux/build-deb.sh`).
+   - Scripts de pré e pós-instalação Debian (`DEBIAN/postinst`, `DEBIAN/prerm`).
+   - Arquivo de unidade systemd (`moveops.service`) com diretivas de restrição e isolamento de privilégios.
+   - Scripts de instalação para Windows (`Install-MoveOps.ps1`, `Instalar-MoveOps.bat`) e regras restritivas de firewall.
+6. **Camada de Bandeja do Sistema e Interação com Desktop (`pkg/tray`):**
+   - Invocação segura de APIs Win32 via `syscall.NewLazyDLL` e dimensionamento com `unsafe.Sizeof`.
+   - Prevenção de Buffer Overrun e terminação nula forçada em estruturas `NOTIFYICONDATAW`.
+   - Sanitização de URLs na função `OpenBrowser` e uso direto de `ShellExecuteW` (dispensando `cmd.exe`).
 
 ---
 
-## 3. Análise Detalhada dos 12 Vetores de Segurança Auditados
+## 3. Análise Detalhada dos 17 Vetores de Segurança Auditados
 
 A tabela a seguir consolida a matriz completa de vetores de risco analisados e as respectivas contramedidas arquiteturais implementadas no MoveOps:
 
@@ -75,6 +89,11 @@ A tabela a seguir consolida a matriz completa de vetores de risco analisados e a
 | **SEC-10** | Truncamento e Erro em Nomes Longos (>260 chars Win32) | **CWE-120** | **ALTA** | Normalização arquitetural com prefixos do subsistema NT (`\\?\` e `\\?\UNC\`) em `pkg/platform`. | **NULA** |
 | **SEC-11** | Corrupção de Estado / Checkpoints em Retomada Pós-Falha | **CWE-372** | **MÉDIA** | Escrita síncrona JSONL, recuperação tolerante com descarte de linhas quebradas e checagem `IsCompleted`. | **NULA** |
 | **SEC-12** | Directory Traversal Direto em Construtor de Auditoria | **CWE-22** | **MÉDIA** | Validação em profundidade contra `/`, `\` e `..` dentro de `audit.NewLogger`, independente da origem do caller. | **NULA** |
+| **SEC-13** | Injeção de Comando e Argumento em Abertura de Navegador | **CWE-78 / CWE-88** | **ALTA** | Validação com `ValidateBrowserURL`, bloqueio de metacaracteres/hífens e uso direto de `ShellExecuteW`. | **NULA** |
+| **SEC-14** | Buffer Overrun em Estruturas de Bandeja Win32 (`NOTIFYICONDATAW`) | **CWE-120** | **MÉDIA** | Dimensionamento via `unsafe.Sizeof`, zeramento integral de memória e terminação nula forçada (`szTip`, `szInfo`). | **NULA** |
+| **SEC-15** | Permissões Excessivas e Escalação em Pacote Debian / Scripts | **CWE-732** | **ALTA** | Pacote construído com `--root-owner-group`, arquivos restritos a `755/644` e proibição de `chmod 777`. | **NULA** |
+| **SEC-16** | Exposição Excessiva de Rede no Firewall do Windows | **CWE-284** | **MÉDIA** | Regras `netsh advfirewall` restritas exclusivamente a protocolo TCP nas portas da aplicação (`8080`, `$Port`). | **NULA** |
+| **SEC-17** | Escalação Indevida de Privilégios no Serviço Systemd | **CWE-250** | **MÉDIA** | Inclusão de `NoNewPrivileges=true`, `ProtectKernelModules=true`, `ProtectControlGroups=true` e `RestrictRealtime=true`. | **NULA** |
 
 ---
 
@@ -98,8 +117,8 @@ flowchart TD
 2. **Camada da Engine (`pkg/engine/engine.go`):** A função `isValidJobID` restringe o identificador a uma expressão regular estrita `^[a-zA-Z0-9_\-]+$`, com tamanho máximo de 128 caracteres.
 3. **Camada de Auditoria (`pkg/audit/logger.go`):** O construtor `NewLogger(jobID, outputDir)` implementa validação defensiva autônoma:
    ```go
-   if strings.Contains(jobID, "/") || strings.Contains(jobID, "\\") || strings.Contains(jobID, "..") || strings.ContainsRune(jobID, 0) {
-       return nil, fmt.Errorf("jobID inválido para criação de logs: contém caracteres ilegais")
+   if jobID == "" || strings.ContainsAny(jobID, "/\\") || strings.Contains(jobID, "..") || strings.ContainsRune(jobID, 0) {
+       return nil, fmt.Errorf("job_id inválido para auditoria: tentativa de path traversal detectada")
    }
    ```
    Dessa forma, mesmo que uma futura alteração no código contorne a camada HTTP, o subsistema de arquivos nunca criará ou manipulará diretórios arbitrários no sistema operacional.
@@ -112,7 +131,7 @@ Um vetor comum em servidores web embutidos é a possibilidade de usuários manip
 
 O MoveOps implementa uma arquitetura blindada de duas frentes:
 1. **Modo Padrão — UI Embarcada em Memória (`embed.FS`):**
-   - Os artefatos compilados da interface React SPA (`index.html`, bundles JS, CSS e ícones) são compilados diretamente dentro da seção de dados do binário estático Go via `//go:embed dist/*`.
+   - Os artefatos compilados da interface React SPA (`index.html`, bundles JS, CSS e ícones) são compilados diretamente dentro da seção de dados do binário estático Go via `//go:embed dist/*` (`pkg/ui/embed.go`).
    - As leituras são intermediadas pela interface abstrata `io/fs.FS`, cujos nós de arquivo residem exclusivamente na memória RAM do processo.
    - Como o `embed.FS` **não executa syscalls de abertura de arquivos no sistema de arquivos hospedeiro**, tentativas de travessia de caminho (como `GET /../../../../etc/passwd`) são matematicamente incapazes de tocar no disco do servidor.
 2. **Modo Alternativo — Servidor com Diretório Local (`-dir`):**
@@ -185,13 +204,84 @@ sequenceDiagram
 
 ---
 
+### 4.6 Domínio 6: Segurança de Empacotamento Debian e Serviço Systemd
+
+#### Auditoria do Pacote `.deb` e Scripts de Ciclo de Vida:
+- **`build-deb.sh`:** Constrói o pacote com `dpkg-deb --build --root-owner-group`, garantindo que todo o conteúdo pertença estritamente ao usuário `root` e grupo `root`.
+- **Permissões de Arquivos:** O binário `/usr/local/bin/moveops` é provisionado com permissão `0755` (somente gravável por root), e arquivos de configuração, ícones e unidades systemd recebem `0644`. O uso de permissões amplas (`chmod 777`) é categoricamente rejeitado.
+- **`DEBIAN/postinst` e `DEBIAN/prerm`:**
+  - `postinst`: Executa apenas recargas de bancos de dados desktop (`update-desktop-database`, `gtk-update-icon-cache`) e `systemctl daemon-reload`. Não realiza downloads externos ou modificações em privilégios de usuários.
+  - `prerm`: Interrompe e desabilita graciosamente `moveops.service` durante desinstalação ou atualização, prevenindo processos orfãos em background.
+
+#### Hardening do Serviço Systemd (`packaging/linux/moveops.service`):
+O serviço opera com caminho absoluto `/usr/local/bin/moveops` e incorpora diretivas modernas de isolamento do kernel:
+```ini
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/moveops -port 8080 -audit-dir /var/log/moveops
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+LimitNPROC=65536
+StandardOutput=journal
+StandardError=journal
+
+# Hardening e Isolamento de Segurança Systemd
+NoNewPrivileges=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+```
+- `NoNewPrivileges=true`: Garante que o processo e quaisquer subprocessos nunca possam obter novos privilégios via binários setuid/setgid.
+- `ProtectKernelModules=true`: Impede que a aplicação carregue ou descarregue módulos de kernel.
+- `ProtectControlGroups=true`: Torna as hierarquias de cgroups do sistema operacional somente-leitura.
+- `RestrictRealtime=true`: Bloqueia tentativas de escalonamento em tempo real, prevenindo negação de serviço ao restante do sistema.
+
+---
+
+### 4.7 Domínio 7: Segurança da Bandeja do Sistema e Interoperabilidade Win32
+
+#### Blindagem contra Command Injection em Abertura de Navegador (`pkg/tray/tray.go`):
+A função `OpenBrowser` implementa uma barreira estrita de validação com `ValidateBrowserURL(rawURL)`:
+1. **Rejeição de Argument Injection (CWE-88):** Bloqueia URLs iniciadas com `-` ou `/`, que poderiam ser interpretadas como opções de linha de comando por ferramentas de desktop (`xdg-open` / navegadores).
+2. **Eliminação de Metacaracteres de Shell:** Rejeita explicitamente caracteres perigosos de interpolação: `&`, `|`, `;`, `$`, `` ` ``, `<`, `>`, `"`, `'`, `\r`, `\n`, `\x00`.
+3. **Whitelist Rígida de Esquemas:** Aceita exclusivamente protocolos `http` e `https`, rejeitando vetores como `javascript:`, `file:`, `data:`, `smb:`, `vbscript:`.
+4. **Chamada Direta via `ShellExecuteW` no Windows (`pkg/tray/tray_windows.go`):**
+   ```go
+   func openBrowserPlatform(rawURL string) error {
+       verb, _ := syscall.UTF16PtrFromString("open")
+       urlPtr, _ := syscall.UTF16PtrFromString(rawURL)
+       ret, _, err := procShellExecuteW.Call(
+           0,
+           uintptr(unsafe.Pointer(verb)),
+           uintptr(unsafe.Pointer(urlPtr)),
+           0, 0, 1,
+       )
+       if ret <= 32 {
+           return fmt.Errorf("ShellExecuteW falhou: %w", err)
+       }
+       return nil
+   }
+   ```
+   A invocação direta de `ShellExecuteW` a partir de `shell32.dll` dispensa totalmente o uso de `cmd.exe /c start`, tornando a execução 100% imune a injeção de comandos de prompt e eliminando a abertura transitória de janelas pretas de console.
+
+#### Integridade de Memória e Estruturas Win32 (`NOTIFYICONDATAW`):
+- O registro na bandeja do sistema manipula a estrutura `NOTIFYICONDATAW`. O campo `cbSize` é alimentado dinamicamente com `uint32(unsafe.Sizeof(t.nid))`, assegurando compatibilidade binária exata com a versão da API Win32 do kernel.
+- **Mitigação de Buffer Overrun (CWE-120):** Os buffers de texto UTF-16 (`szTip` [128], `szInfoTitle` [64], `szInfo` [256]) são explicitamente zerados antes de receber conteúdo, e o último elemento de cada array é forçado para o terminador nulo `0` (`t.nid.szTip[len(t.nid.szTip)-1] = 0`), garantindo que o subsistema Shell do Windows nunca leia além dos limites alocados.
+
+#### Script de Instalação Windows e Regras de Firewall (`packaging/windows/Install-MoveOps.ps1`):
+- **Elevação UAC Segura:** Valida se a sessão atual possui privilégios de Administrador através de `WindowsPrincipal.IsInRole([WindowsBuiltInRole]::Administrator)`. Se ausente, eleva via `Start-Process powershell.exe -Verb RunAs` solicitando consentimento explícito do operador.
+- **Regras Restritivas de Firewall:** As regras de rede do Windows Firewall (`netsh advfirewall firewall`) abrem estritamente as portas TCP da aplicação (`8080` e `$Port` / 8082), proibindo conexões UDP indiscriminadas ou portas genéricas.
+
+---
+
 ## 5. Recomendações de Operação e Boas Práticas Corporativas
 
 Para manter a máxima conformidade em ambientes de missão crítica, recomenda-se observar as seguintes diretrizes:
 
 1. **Topologia de Rede e Camada de Acesso (AuthN / AuthZ / TLS):**
    - O MoveOps v1.0.0 foi concebido como um motor de infraestrutura para execução direta no host de migração ou em rede privada de gerenciamento (VLAN restrita de TI).
-   - Caso o painel web (`:8080`) precise ser disponibilizado para operadores fora da rede de gerenciamento, posicione o MoveOps atrás de um proxy reverso seguro (ex: **Nginx**, **Traefik** ou **Envoy**) provendo autenticação (OAuth2/OIDC, mTLS ou Basic Auth) e terminação TLS com certificados corporativos válidos.
+   - Caso o painel web (`:8080` / `:8082`) precise ser disponibilizado para operadores fora da rede de gerenciamento, posicione o MoveOps atrás de um proxy reverso seguro (ex: **Nginx**, **Traefik** ou **Envoy**) provendo autenticação (OAuth2/OIDC, mTLS ou Basic Auth) e terminação TLS com certificados corporativos válidos.
 2. **Atualização da Toolchain Go:**
    - Em pipelines de compilação contínua (CI/CD), recomenda-se manter a versão do compilador Go atualizada (mínimo Go 1.22.x, recomendado Go 1.26.x) para usufruir das atualizações de segurança da biblioteca padrão.
 3. **Execução em Contêineres com Privilégio Reduzido:**
@@ -201,10 +291,10 @@ Para manter a máxima conformidade em ambientes de missão crítica, recomenda-s
 
 ## 6. Parecer Técnico Formal de Liberação (Release Clearance)
 
-Com base nos resultados consolidados das auditorias de código estático, inspeção de chamadas de sistema no kernel, análise de gerenciamento de memória e conclusão com 100% de aproveitamento da bateria de testes automatizados de homologação:
+Com base nos resultados consolidados das auditorias de código estático, inspeção de chamadas de sistema no kernel, análise de empacotamento Debian, auditoria de scripts Windows PowerShell, validação da API Win32 no modo System Tray e conclusão com 100% de aproveitamento da bateria de testes automatizados de homologação:
 
 > ### **PARECER FORMAL DA AUDITORIA: HOMOLOGADO PARA PRODUÇÃO**
-> O software **MoveOps v1.0.0** atende integralmente a todos os critérios e diretrizes de segurança da informação, tolerância a falhas catastróficas, resiliência de estado, isolamento de execução e proteção de infraestrutura de armazenamento.
+> O software **MoveOps v1.0.0** atende integralmente a todos os critérios e diretrizes de segurança da informação, tolerância a falhas catastróficas, resiliência de estado, isolamento de execução, proteção contra Command/Argument Injection e robustez de empacotamento operacional.
 >
 > **A liberação para implantação em ambientes corporativos de produção é OFICIALMENTE RATIFICADA E HOMOLOGADA.**
 

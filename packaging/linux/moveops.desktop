@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=MoveOps
+Comment=Enterprise Data Migration Engine
+GenericName=Data Migration
+Exec=/usr/local/bin/moveops -open -tray
+Icon=moveops
+Terminal=false
+Type=Application
+Categories=Utility;System;Archiving;FileManager;
+Keywords=migration;sync;backup;data;files;moveops;
+StartupNotify=true
