@@ -1,0 +1,32 @@
+# Binaries and executables
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries and coverage
+*.test
+*.out
+coverage.txt
+
+# Go build cache
+.cache/
+
+# Node / Frontend
+web/node_modules/
+web/.eslintcache
+.npm/
+
+# Logs and runtime artifacts
+*.log
+**/audit_logs/*.jsonl
+**/audit_logs/*.csv
+!audit_logs/.gitkeep
+pkg/engine/audit_logs/
+
+# Temporary / Scratch
+scratch/
+.DS_Store
+Thumbs.db
